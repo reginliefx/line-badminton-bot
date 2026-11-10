@@ -13,17 +13,17 @@
     {
       "keywords": ["กิจกรรม", "event"],
       "reply": "🏸 กิจกรรมของสนามเรา",
-      "images": ["event.jpg"]
+      "images": ["event.png"]
     },
     {
       "keywords": ["ตารางการบริการ"],
       "reply": "📅 ตารางการบริการ",
-      "images": ["schedule.jpg"]
+      "images": ["schedule.png"]
     },
       {
       "keywords": ["กฎระเบียบ", "กฎ", "ระเบียบ"],
       "reply": "❗ กฎระเบียบการใช้งาน",
-      "images": ["rules.jpg"]
+      "images": ["rules.png"]
     },
     {
       "keywords": ["เบอร์", "ติดต่อ", "โทร"],

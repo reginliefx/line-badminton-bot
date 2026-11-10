@@ -338,7 +338,7 @@ def status_flex() -> FlexMessage:
     header_row = {
         "type": "box",
         "layout": "horizontal",
-        "contents": [cell("เวลา", 6, weight="bold", color="#555555", align="start")]
+        "contents": [cell("เวลา", 3, weight="bold", color="#555555", align="start")]
         + [cell(str(c), 2, weight="bold", color="#555555") for c in COURTS],
     }
     rows = [header_row, {"type": "separator", "margin": "sm"}]
@@ -356,14 +356,13 @@ def status_flex() -> FlexMessage:
                 "type": "box",
                 "layout": "horizontal",
                 "margin": "md",
-                "contents": [cell(slot_label(h), 3, align="start", color="#444444")]
+                "contents": [cell(f"{h:02d}-{h + 1:02d}", 3, align="start", color="#444444")]
                 + [cell(i, 2) for i in icons],
             }
         )
 
     bubble = {
         "type": "bubble",
-        "size": "giga",
         "header": _title("📊 สถานะคอร์ดวันนี้", f"วันที่ {today_thai()} · คอร์ด 1-5 · คอร์ดละ 1 ชม."),
         "body": {"type": "box", "layout": "vertical", "contents": rows},
         "footer": {

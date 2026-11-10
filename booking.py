@@ -363,7 +363,7 @@ def status_flex() -> FlexMessage:
 
     bubble = {
         "type": "bubble",
-        "header": _title("📊 สถานะคอร์ดวันนี้", f"วันที่ {today_thai()} · คอร์ด 1-5 · คอร์ดละ 1 ชม."),
+        "header": _title("📊 สถานะคอร์ดวันนี้", f"วันที่ {today_thai()} · คอร์ด 1-5"),
         "body": {"type": "box", "layout": "vertical", "contents": rows},
         "footer": {
             "type": "box",

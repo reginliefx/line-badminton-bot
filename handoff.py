@@ -159,9 +159,9 @@ def admin_notice_flex(user_id: str, name: str, text: str) -> FlexMessage:
                 {"type": "text", "text": f"ข้อความ: {text[:200]}", "size": "sm", "color": "#666666", "wrap": True},
                 {
                     "type": "text",
-                    "text": "เรียกผู้ดูแลแล้ว กรุณารอสักครู่ "
-                    f"(บอทหยุดตอบผู้ใช้งานเป็นเวลา {PAUSE_MINUTES} นาที) "
-                    "เมื่อเสร็จแล้วกดปุ่มด้านล่าง ผู้ใช้งานกรุณาอย่ากดคืนให้บอทเองนะครับ 🙂",
+                    "text": "ไปตอบที่แชต LINE Official Account "
+                    f"(บอทหยุดตอบลูกค้ารายนี้ {PAUSE_MINUTES} นาที) "
+                    "ตอบเสร็จแล้วกดปุ่มด้านล่าง หรือพิมพ์ \"Buddy Go\" มาหาบอทใน LINE ส่วนตัวของคุณ",
                     "size": "xs",
                     "color": "#888888",
                     "wrap": True,

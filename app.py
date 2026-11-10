@@ -60,7 +60,7 @@ def match_wake_word(text: str):
     return None
 
 
-def build_messages(rule: dict):
+def build_messages(rule: dict, user_id: str | None = None):
     """สร้างรายการข้อความตอบกลับจากกฎ: ข้อความ (reply), Flex (flex_file),
     รูป (images) และระบบจองคอร์ด (action)
     LINE ส่งได้สูงสุด 5 ข้อความต่อการตอบหนึ่งครั้ง"""
@@ -86,6 +86,8 @@ def build_messages(rule: dict):
         messages.append(booking.court_picker_flex())
     elif action == "status":
         messages.append(booking.status_flex())
+    elif action == "my_bookings":
+        messages.append(booking.my_bookings_message(user_id))
     return messages[:5]
 
 
@@ -128,6 +130,37 @@ def push_to_admins(messages):
                 logging.exception("push to admin failed: %s", admin_id)
 
 
+NOTIFY_ON_RESUME = os.environ.get("NOTIFY_CUSTOMER_ON_RESUME", "1") == "1"
+RESUME_TEXT = "🤖 บอทกลับมาตอบแล้วครับ ถามได้เลย"
+
+
+def push_to_user(user_id: str, messages):
+    try:
+        with ApiClient(line_config) as client:
+            MessagingApi(client).push_message(PushMessageRequest(to=user_id, messages=messages))
+    except Exception:
+        logging.exception("push to user failed: %s", user_id)
+
+
+def notify_resumed(user_id: str):
+    """บอกลูกค้าว่าบอทกลับมาตอบแล้ว (นับเป็นโควตา push — ปิดได้ด้วย NOTIFY_CUSTOMER_ON_RESUME=0)"""
+    if NOTIFY_ON_RESUME:
+        push_to_user(user_id, [TextMessage(text=RESUME_TEXT)])
+
+
+def close_case_messages():
+    """แอดมินสั่ง 'ปิดเคส': ถ้ามีลูกค้ารอคนเดียวคืนให้บอทเลย ถ้ามีหลายคนส่งการ์ดให้เลือก"""
+    items = handoff.list_paused()
+    if not items:
+        return [TextMessage(text="ไม่มีลูกค้าที่รอแอดมินตอบอยู่ครับ")]
+    if len(items) == 1:
+        user_id, name, _ = items[0]
+        handoff.resume(user_id)
+        notify_resumed(user_id)
+        return [TextMessage(text=f"✅ ปิดเคสแล้ว คืนให้บอท: {name or 'ลูกค้า'}\nบอทกลับมาตอบลูกค้ารายนี้แล้วครับ")]
+    return [handoff.paused_list_flex(items)]
+
+
 def send(event, messages):
     with ApiClient(line_config) as client:
         MessagingApi(client).reply_message(
@@ -159,6 +192,17 @@ def on_text(event: MessageEvent):
     rule = match_wake_word(text)
     action = rule.get("action") if rule else None
 
+    # แอดมินพิมพ์ "ปิดเคส" หาบอทใน LINE ส่วนตัว → คืนลูกค้าให้บอท (คนทั่วไปพิมพ์คำนี้ = ข้อความปกติ)
+    if action == "admin_close":
+        if user_id and user_id in ADMIN_USER_IDS:
+            try:
+                send(event, close_case_messages())
+            except Exception:
+                logging.exception("close case error")
+                send(event, [TextMessage(text="ขอโทษครับ ระบบมีปัญหาชั่วคราว ลองใหม่อีกครั้งนะ")])
+            return
+        rule, action = None, None
+
     # ลูกค้าอยู่ในช่วงให้แอดมินตอบ: บอทเงียบ (ยกเว้นคำสั่งคืนให้บอท)
     if user_id and action != "resume_bot" and handoff.is_paused(user_id):
         return
@@ -178,7 +222,7 @@ def on_text(event: MessageEvent):
 
     if rule:
         try:
-            messages = build_messages(rule)
+            messages = build_messages(rule, user_id)
         except Exception:
             logging.exception("build_messages error")
             messages = [
@@ -205,11 +249,21 @@ def on_postback(event: PostbackEvent):
                 return
             target = data.get("u", "")
             n = handoff.resume(target)
+            if n:
+                notify_resumed(target)
             messages = [
                 TextMessage(
                     text="✅ คืนให้บอทแล้ว บอทกลับมาตอบลูกค้ารายนี้" if n else "ลูกค้ารายนี้ไม่ได้อยู่ในสถานะหยุดบอทแล้วครับ"
                 )
             ]
+        elif action == "resume_all":
+            if event.source.user_id not in ADMIN_USER_IDS:
+                return
+            waiting = [uid for uid, _name, _until in handoff.list_paused()]
+            n = handoff.resume_all()
+            for uid in waiting:
+                notify_resumed(uid)
+            messages = [TextMessage(text=f"✅ คืนให้บอทแล้ว {n} คน" if n else "ไม่มีลูกค้าที่รอแอดมินตอบอยู่ครับ")]
         elif action == "court":
             messages = [booking.slot_picker_flex(int(data["c"]))]
         elif action == "book":

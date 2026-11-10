@@ -11,12 +11,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import gspread
-from linebot.v3.messaging import FlexContainer, FlexMessage
+from linebot.v3.messaging import FlexContainer, FlexMessage, TextMessage
 
 TZ = ZoneInfo("Asia/Bangkok")
 COURTS = [1, 2, 3, 4, 5]
 HOURS = list(range(10, 20))  # รอบเริ่ม 10:00 ... 19:00 (รอบสุดท้ายจบ 20:00)
 SHEET_NAME = os.environ.get("BOOKING_SHEET_NAME", "bookings")
+BLOCK_PAST = os.environ.get("BLOCK_PAST_SLOTS", "1") == "1"
+HISTORY_LIMIT = 10  # จำนวนรายการล่าสุดที่แสดงในประวัติการจอง
 
 GREEN, RED, GRAY = "🟢", "🔴", "⚪"
 
@@ -60,8 +62,9 @@ def slot_label(hour: int) -> str:
 
 
 def _is_past(hour: int) -> bool:
-    # รอบที่เริ่มไปแล้วเกิน 1 ชั่วโมงถือว่าผ่านแล้ว (รอบปัจจุบันยังจองได้)
-    return hour < _now().hour
+    """อิงเวลาจริง: ช่วงที่เริ่มไปก่อนชั่วโมงปัจจุบันถือว่าผ่านแล้ว จองไม่ได้ (ช่วงปัจจุบันยังจองได้)
+    ถ้าอยากปิดการตรวจนี้ (เช่น ตอนทดสอบ) ให้ตั้ง Environment Variable BLOCK_PAST_SLOTS=0"""
+    return BLOCK_PAST and hour < _now().hour
 
 
 def get_booked(date_str: str | None = None) -> dict:
@@ -113,6 +116,68 @@ def book_slot(court: int, hour: int, user_id: str, name: str) -> str:
         ws.delete_rows(mine)
         return "taken"
     return "ok"
+
+
+def _thai_date(date_str: str) -> str:
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return f"{d.day}/{d.month}/{d.year + 543}"
+    except ValueError:
+        return date_str
+
+
+def get_user_bookings(user_id: str) -> list:
+    """คืน [(วันที่ 'YYYY-MM-DD', คอร์ด, ชั่วโมง)] ของผู้ใช้คนนี้ เรียงใหม่สุดก่อน"""
+    out = []
+    for row in _worksheet().get_all_values()[1:]:
+        if len(row) >= 4 and row[3] == user_id:
+            try:
+                out.append((row[0].strip(), int(row[1]), int(row[2])))
+            except ValueError:
+                continue
+    out.sort(key=lambda b: (b[0], b[2]), reverse=True)
+    return out
+
+
+def my_bookings_message(user_id: str | None):
+    """ประวัติการจองของผู้ใช้ (Flex) หรือข้อความถ้ายังไม่มี"""
+    if not user_id:
+        return TextMessage(text="ดูประวัติการจองได้เฉพาะในแชตส่วนตัวกับบอทครับ")
+    bookings = get_user_bookings(user_id)
+    if not bookings:
+        return TextMessage(text="📭 ยังไม่มีประวัติการจองครับ พิมพ์ \"จองคอร์ด\" เพื่อเริ่มจองได้เลย")
+
+    today = today_str()
+    rows = []
+    for date, court, hour in bookings[:HISTORY_LIMIT]:
+        is_today = date == today
+        rows.append(
+            {
+                "type": "box",
+                "layout": "horizontal",
+                "spacing": "sm",
+                "paddingAll": "sm",
+                "margin": "xs",
+                "cornerRadius": "md",
+                "backgroundColor": "#E8F5E9" if is_today else "#F6F6F6",
+                "contents": [
+                    {"type": "text", "text": _thai_date(date), "flex": 4, "size": "sm", "gravity": "center"},
+                    {"type": "text", "text": f"คอร์ด {court}", "flex": 3, "size": "sm", "weight": "bold", "gravity": "center"},
+                    {"type": "text", "text": slot_label(hour), "flex": 5, "size": "xs", "align": "end", "gravity": "center"},
+                ],
+            }
+        )
+        if is_today:
+            rows[-1]["contents"][0]["text"] = f"วันนี้ {_thai_date(date)}"
+            rows[-1]["contents"][0]["color"] = "#2E7D32"
+
+    sub = f"แสดง {min(len(bookings), HISTORY_LIMIT)} รายการล่าสุด จากทั้งหมด {len(bookings)}"
+    bubble = {
+        "type": "bubble",
+        "header": _title("🗓 ประวัติการจองของคุณ", sub),
+        "body": {"type": "box", "layout": "vertical", "contents": rows},
+    }
+    return _flex("ประวัติการจองของคุณ", bubble)
 
 
 def result_text(result: str, court: int, hour: int) -> str:

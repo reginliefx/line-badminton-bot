@@ -61,6 +61,79 @@ def resume(user_id: str) -> int:
     return len(targets)
 
 
+def list_paused() -> list:
+    """คืน [(user_id, name, หมดเวลา)] ของลูกค้าที่บอทกำลังหยุดตอบอยู่ (ยังไม่หมดเวลา)"""
+    out = []
+    for row in _worksheet().get_all_values()[1:]:
+        if len(row) >= 3 and row[0]:
+            try:
+                until = datetime.fromisoformat(row[2])
+            except ValueError:
+                continue
+            if until > _now():
+                out.append((row[0], row[1], until))
+    return out
+
+
+def resume_all() -> int:
+    """คืนให้บอททุกคน (ลบทุกแถวยกเว้นหัวตาราง) คืนจำนวนแถวที่ลบ"""
+    ws = _worksheet()
+    rows = ws.get_all_values()
+    targets = [i for i, r in enumerate(rows, start=1) if i > 1 and r and r[0]]
+    for i in reversed(targets):
+        ws.delete_rows(i)
+    return len(targets)
+
+
+def paused_list_flex(items: list) -> FlexMessage:
+    """การ์ดรายชื่อลูกค้าที่รอแอดมิน พร้อมปุ่มคืนให้บอทรายคน/ทั้งหมด"""
+    rows = []
+    for user_id, name, _until in items[:10]:
+        rows.append(
+            {
+                "type": "box",
+                "layout": "horizontal",
+                "spacing": "md",
+                "margin": "sm",
+                "contents": [
+                    {"type": "text", "text": name or "(ไม่ทราบชื่อ)", "flex": 3, "gravity": "center", "wrap": True},
+                    {
+                        "type": "button",
+                        "style": "secondary",
+                        "height": "sm",
+                        "flex": 2,
+                        "action": {"type": "postback", "label": "คืนให้บอท", "data": f"a=resume&u={user_id}"},
+                    },
+                ],
+            }
+        )
+    if len(items) > 10:
+        rows.append({"type": "text", "text": f"และอีก {len(items) - 10} คน", "size": "xs", "color": "#888888", "margin": "md"})
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [{"type": "text", "text": f"🙋 ลูกค้าที่รอแอดมิน ({len(items)})", "weight": "bold"}],
+        },
+        "body": {"type": "box", "layout": "vertical", "contents": rows},
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#0B6E4F",
+                    "height": "sm",
+                    "action": {"type": "postback", "label": "✅ คืนให้บอททั้งหมด", "data": "a=resume_all"},
+                }
+            ],
+        },
+    }
+    return FlexMessage(alt_text="ลูกค้าที่รอแอดมิน", contents=FlexContainer.from_json(json.dumps(bubble)))
+
+
 def pause(user_id: str, name: str) -> datetime:
     """ให้บอทหยุดตอบลูกค้าคนนี้ไปอีก PAUSE_MINUTES นาที"""
     resume(user_id)  # ลบแถวเก่าก่อน กันซ้ำ
@@ -86,8 +159,9 @@ def admin_notice_flex(user_id: str, name: str, text: str) -> FlexMessage:
                 {"type": "text", "text": f"ข้อความ: {text[:200]}", "size": "sm", "color": "#666666", "wrap": True},
                 {
                     "type": "text",
-                    "text": "ไปตอบที่แอป LINE Official Account > แชต "
-                    f"(บอทหยุดตอบลูกค้ารายนี้ {PAUSE_MINUTES} นาที)",
+                    "text": "ไปตอบที่แชต LINE Official Account "
+                    f"(บอทหยุดตอบลูกค้ารายนี้ {PAUSE_MINUTES} นาที) "
+                    "ตอบเสร็จแล้วกดปุ่มด้านล่าง หรือพิมพ์ \"Buddy Go\" มาหาบอทใน LINE ส่วนตัวของคุณ",
                     "size": "xs",
                     "color": "#888888",
                     "wrap": True,

@@ -154,14 +154,14 @@ def admin_notice_flex(user_id: str, name: str, text: str) -> FlexMessage:
             "layout": "vertical",
             "spacing": "sm",
             "contents": [
-                {"type": "text", "text": "🙋 ลูกค้าขอคุยกับผู้ดูแล", "weight": "bold", "size": "md"},
+                {"type": "text", "text": "🙋 ผู้ใช้งานขอคุยกับผู้ดูแล", "weight": "bold", "size": "md"},
                 {"type": "text", "text": f"ชื่อ: {name or '(ไม่ทราบชื่อ)'}", "size": "sm", "wrap": True},
                 {"type": "text", "text": f"ข้อความ: {text[:200]}", "size": "sm", "color": "#666666", "wrap": True},
                 {
                     "type": "text",
-                    "text": "ไปตอบที่แชต LINE Official Account "
-                    f"(บอทหยุดตอบลูกค้ารายนี้ {PAUSE_MINUTES} นาที) "
-                    "ตอบเสร็จแล้วกดปุ่มด้านล่าง หรือพิมพ์ \"Buddy Go\" มาหาบอทใน LINE ส่วนตัวของคุณ",
+                    "text": "เรียกผู้ดูแลแล้ว กรุณารอสักครู่ "
+                    f"(บอทหยุดตอบผู้ใช้งานเป็นเวลา {PAUSE_MINUTES} นาที) "
+                    "เมื่อเสร็จแล้วกดปุ่มด้านล่าง ผู้ใช้งานกดคืนให้บอทเองได้ครับ",
                     "size": "xs",
                     "color": "#888888",
                     "wrap": True,

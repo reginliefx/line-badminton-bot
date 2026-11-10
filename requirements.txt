@@ -3,3 +3,5 @@ gunicorn
 python-dotenv
 line-bot-sdk>=3.0
 google-genai
+gspread
+tzdata

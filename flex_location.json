@@ -1,0 +1,102 @@
+{
+  "type": "bubble",
+  "body": {
+    "contents": [
+      {
+        "size": "xl",
+        "text": "สนามกีฬาไทยญี่ปุ่น",
+        "type": "text",
+        "weight": "bold"
+      },
+      {
+        "contents": [
+          {
+            "contents": [
+              {
+                "color": "#aaaaaa",
+                "flex": 1,
+                "size": "sm",
+                "text": "Place",
+                "type": "text"
+              },
+              {
+                "color": "#666666",
+                "flex": 5,
+                "size": "sm",
+                "text": "2 ถนนมิตรไมตรี แขวงดินแดง เขตดินแดง กรุงเทพมหานคร 10400",
+                "type": "text",
+                "wrap": true
+              }
+            ],
+            "layout": "baseline",
+            "spacing": "sm",
+            "type": "box"
+          },
+          {
+            "contents": [
+              {
+                "color": "#aaaaaa",
+                "flex": 1,
+                "size": "sm",
+                "text": "Time",
+                "type": "text"
+              },
+              {
+                "color": "#666666",
+                "flex": 5,
+                "size": "sm",
+                "text": "04:00 – 22:00",
+                "type": "text",
+                "wrap": true
+              }
+            ],
+            "layout": "baseline",
+            "spacing": "sm",
+            "type": "box"
+          }
+        ],
+        "layout": "vertical",
+        "margin": "lg",
+        "spacing": "sm",
+        "type": "box"
+      }
+    ],
+    "layout": "vertical",
+    "type": "box"
+  },
+  "footer": {
+    "contents": [
+      {
+        "action": {
+          "label": "📍 คลิ๊กเพื่อดูพิกัด",
+          "type": "uri",
+          "uri": "https://maps.app.goo.gl/mXyGKxd444vvU2478"
+        },
+        "height": "sm",
+        "style": "link",
+        "type": "button"
+      },
+      {
+        "contents": [],
+        "layout": "vertical",
+        "margin": "sm",
+        "type": "box"
+      }
+    ],
+    "flex": 0,
+    "layout": "vertical",
+    "spacing": "sm",
+    "type": "box"
+  },
+  "hero": {
+    "action": {
+      "type": "uri",
+      "uri": "https://line.me/"
+    },
+    "aspectMode": "cover",
+    "aspectRatio": "20:13",
+    "size": "full",
+    "type": "image",
+    "url": "https://cdn.discordapp.com/attachments/859240629954805801/1563748763741192234/image.png?ex=6adec206&is=6add7086&hm=dc469c4997e8bcca6fa9cf64a0afcbd3398b73a712b99a102234e5b8519f9b77"
+  }
+}

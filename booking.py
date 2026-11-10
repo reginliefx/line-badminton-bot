@@ -356,7 +356,7 @@ def status_flex() -> FlexMessage:
                 "type": "box",
                 "layout": "horizontal",
                 "margin": "md",
-                "contents": [cell(f"{h:02d}-{h + 1:02d}", 3, align="start", color="#444444")]
+                "contents": [cell(slot_label(h), 3, align="start", color="#444444")]
                 + [cell(i, 2) for i in icons],
             }
         )

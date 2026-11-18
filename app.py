@@ -237,7 +237,8 @@ def on_text(event: MessageEvent):
 
 @handler.add(PostbackEvent)
 def on_postback(event: PostbackEvent):
-    """ปุ่มใน Flex การจอง: a=menu | a=court&c=2 | a=book&c=2&h=14"""
+    """ปุ่มใน Flex การจอง: a=menu | a=court&c=2 | a=book&c=2&h=14 |
+    a=mybookings | a=cancel_ask&d=2026-11-18&c=2&h=14 | a=cancel_do&..."""
     data = dict(parse_qsl(event.postback.data))
     action = data.get("a")
     try:
@@ -264,6 +265,18 @@ def on_postback(event: PostbackEvent):
             for uid in waiting:
                 notify_resumed(uid)
             messages = [TextMessage(text=f"✅ คืนให้บอทแล้ว {n} คน" if n else "ไม่มีลูกค้าที่รอแอดมินตอบอยู่ครับ")]
+        elif action == "mybookings":
+            messages = [booking.my_bookings_message(event.source.user_id)]
+        elif action == "cancel_ask":
+            messages = [booking.cancel_confirm_flex(data["d"], int(data["c"]), int(data["h"]))]
+        elif action == "cancel_do":
+            date, court, hour = data["d"], int(data["c"]), int(data["h"])
+            user_id = event.source.user_id  # ยกเลิกได้เฉพาะการจองของตัวเอง (ใช้ ID จาก LINE ไม่ใช่จากปุ่ม)
+            result = booking.cancel_booking(user_id, date, court, hour)
+            messages = [
+                TextMessage(text=booking.cancel_result_text(result, date, court, hour)),
+                booking.my_bookings_message(user_id),
+            ]
         elif action == "court":
             messages = [booking.slot_picker_flex(int(data["c"]))]
         elif action == "book":

@@ -1,9 +1,11 @@
 """ระบบจองคอร์ดแบดมินตัน — เก็บข้อมูลการจองใน Google Sheets
 
 ชีต "bookings" แถวแรกเป็นหัวตาราง:
-    date | court | hour | user_id | name | created_at
+    date | court | hour | user_id | name | created_at | status
 ตัวอย่างแถวข้อมูล:
-    2026-11-10 | 2 | 14 | Uxxxxxxxx | สมชาย | 2026-11-10T13:05:11+07:00
+    2026-11-10 | 2 | 14 | Uxxxxxxxx | สมชาย | 2026-11-10T13:05:11+07:00 |
+คอลัมน์ status ว่าง = การจองยังใช้งานอยู่, "cancelled" = ยกเลิกแล้ว (แถวยังอยู่ในชีตเป็นประวัติ
+แต่ไม่นับว่าคอร์ดถูกจอง และไม่นับในโควตาต่อคน)
 """
 import json
 import os
@@ -19,6 +21,10 @@ HOURS = list(range(10, 20))  # รอบเริ่ม 10:00 ... 19:00 (รอ�
 SHEET_NAME = os.environ.get("BOOKING_SHEET_NAME", "bookings")
 BLOCK_PAST = os.environ.get("BLOCK_PAST_SLOTS", "1") == "1"
 HISTORY_LIMIT = 10  # จำนวนรายการล่าสุดที่แสดงในประวัติการจอง
+# จำนวนชั่วโมง (ช่วงละ 1 ชม.) ที่ 1 user ID จองได้สูงสุดต่อวัน — ปรับได้ด้วย Environment Variable MAX_HOURS_PER_USER
+MAX_PER_USER = int(os.environ.get("MAX_HOURS_PER_USER", "2"))
+STATUS_COL = 7  # คอลัมน์ G = status
+CANCELLED = "cancelled"
 
 GREEN, RED, GRAY = "🟢", "🔴", "⚪"
 
@@ -58,7 +64,7 @@ def today_thai():
 
 
 def slot_label(hour: int) -> str:
-    return f"{hour:02d}:00 – {hour + 1:02d}:00"
+    return f"{hour:02d}:00-{hour + 1:02d}:00"
 
 
 def _is_past(hour: int) -> bool:
@@ -67,12 +73,16 @@ def _is_past(hour: int) -> bool:
     return BLOCK_PAST and hour < _now().hour
 
 
+def _is_cancelled(row) -> bool:
+    return len(row) >= STATUS_COL and row[STATUS_COL - 1].strip().lower() == CANCELLED
+
+
 def get_booked(date_str: str | None = None) -> dict:
-    """คืน {(court, hour): แถวข้อมูล} ของวันที่กำหนด (ค่าเริ่มต้น = วันนี้)"""
+    """คืน {(court, hour): แถวข้อมูล} ของวันที่กำหนด (ค่าเริ่มต้น = วันนี้) ไม่รวมแถวที่ยกเลิกแล้ว"""
     date_str = date_str or today_str()
     booked = {}
     for row in _worksheet().get_all_values()[1:]:
-        if len(row) >= 3 and row[0].strip() == date_str:
+        if len(row) >= 3 and row[0].strip() == date_str and not _is_cancelled(row):
             try:
                 booked[(int(row[1]), int(row[2]))] = row
             except ValueError:
@@ -84,38 +94,93 @@ def free_hours(court: int, booked: dict) -> list:
     return [h for h in HOURS if (court, h) not in booked and not _is_past(h)]
 
 
+def count_user_today(rows: list, user_id: str, date: str) -> int:
+    """จำนวนช่วงที่ผู้ใช้จองไว้ในวันนั้น (ไม่นับที่ยกเลิก) จากข้อมูลทุกแถวของชีต"""
+    return sum(
+        1
+        for r in rows[1:]
+        if len(r) >= 4 and r[0].strip() == date and r[3] == user_id and not _is_cancelled(r)
+    )
+
+
+def user_hours_today(user_id: str) -> int:
+    return count_user_today(_worksheet().get_all_values(), user_id, today_str())
+
+
 def book_slot(court: int, hour: int, user_id: str, name: str) -> str:
-    """จองช่วงเวลา คืนค่า: ok | taken | past | invalid"""
+    """จองช่วงเวลา คืนค่า: ok | taken | past | invalid | limit"""
     if court not in COURTS or hour not in HOURS:
         return "invalid"
     if _is_past(hour):
         return "past"
 
     date = today_str()
-    if (court, hour) in get_booked(date):
-        return "taken"
-
     ws = _worksheet()
+    rows = ws.get_all_values()
+    if any(
+        i > 1
+        and len(r) >= 4
+        and r[0].strip() == date
+        and r[1].strip() == str(court)
+        and r[2].strip() == str(hour)
+        and not _is_cancelled(r)
+        for i, r in enumerate(rows, start=1)
+    ):
+        return "taken"
+    if count_user_today(rows, user_id, date) >= MAX_PER_USER:
+        return "limit"
+
     ws.append_row(
         [date, court, hour, user_id, name, _now().isoformat(timespec="seconds")],
         value_input_option="RAW",
     )
 
-    # ตรวจซ้ำ: ถ้าอีกคนจองช่วงเดียวกันพร้อมกันและแถวของเขามาก่อน ให้ถอนการจองของเรา
+    # ตรวจซ้ำหลังเขียน (กันกรณีกดพร้อมกัน)
     rows = ws.get_all_values()
+
+    # 1) ถ้าอีกคนจองช่วงเดียวกันพร้อมกันและแถวของเขามาก่อน ให้ถอนการจองของเรา
     matches = [
         i
         for i, r in enumerate(rows, start=1)
-        if len(r) >= 4
+        if i > 1
+        and len(r) >= 4
         and r[0].strip() == date
         and r[1].strip() == str(court)
         and r[2].strip() == str(hour)
+        and not _is_cancelled(r)
     ]
+    mine_rows = [i for i in matches if rows[i - 1][3] == user_id]
     if len(matches) > 1 and rows[matches[0] - 1][3] != user_id:
-        mine = [i for i in matches if rows[i - 1][3] == user_id][-1]
-        ws.delete_rows(mine)
+        ws.delete_rows(mine_rows[-1])
         return "taken"
+
+    # 2) ถ้ากดหลายช่วงพร้อมกันจนเกินโควตาต่อคน ให้ถอนช่วงที่เพิ่งจอง
+    if count_user_today(rows, user_id, date) > MAX_PER_USER:
+        ws.delete_rows(mine_rows[-1])
+        return "limit"
     return "ok"
+
+
+def cancel_booking(user_id: str, date: str, court: int, hour: int) -> str:
+    """ยกเลิกการจองของตัวเอง คืนค่า: ok | notfound | past
+    ตั้ง status = cancelled (แถวยังอยู่ในชีตเป็นประวัติ) และเปิดช่วงนั้นให้คนอื่นจองได้ทันที"""
+    ws = _worksheet()
+    rows = ws.get_all_values()
+    for i, r in enumerate(rows, start=1):
+        if (
+            i > 1
+            and len(r) >= 4
+            and r[0].strip() == date
+            and r[1].strip() == str(court)
+            and r[2].strip() == str(hour)
+            and r[3] == user_id
+            and not _is_cancelled(r)
+        ):
+            if date < today_str() or (date == today_str() and _is_past(hour)):
+                return "past"
+            ws.update_cell(i, STATUS_COL, CANCELLED)
+            return "ok"
+    return "notfound"
 
 
 def _thai_date(date_str: str) -> str:
@@ -126,58 +191,140 @@ def _thai_date(date_str: str) -> str:
         return date_str
 
 
-def get_user_bookings(user_id: str) -> list:
-    """คืน [(วันที่ 'YYYY-MM-DD', คอร์ด, ชั่วโมง)] ของผู้ใช้คนนี้ เรียงใหม่สุดก่อน"""
+def get_user_history(user_id: str) -> list:
+    """คืน [(วันที่ 'YYYY-MM-DD', คอร์ด, ชั่วโมง, ยกเลิกแล้วหรือไม่)] ของผู้ใช้คนนี้ เรียงใหม่สุดก่อน"""
     out = []
     for row in _worksheet().get_all_values()[1:]:
         if len(row) >= 4 and row[3] == user_id:
             try:
-                out.append((row[0].strip(), int(row[1]), int(row[2])))
+                out.append((row[0].strip(), int(row[1]), int(row[2]), _is_cancelled(row)))
             except ValueError:
                 continue
     out.sort(key=lambda b: (b[0], b[2]), reverse=True)
     return out
 
 
+def get_user_bookings(user_id: str) -> list:
+    """คืน [(วันที่, คอร์ด, ชั่วโมง)] เฉพาะการจองที่ยังไม่ยกเลิก เรียงใหม่สุดก่อน"""
+    return [(d, c, h) for d, c, h, cancelled in get_user_history(user_id) if not cancelled]
+
+
+def _can_cancel(date: str, hour: int) -> bool:
+    today = today_str()
+    return date > today or (date == today and not _is_past(hour))
+
+
 def my_bookings_message(user_id: str | None):
-    """ประวัติการจองของผู้ใช้ (Flex) หรือข้อความถ้ายังไม่มี"""
+    """ประวัติการจองของผู้ใช้ (Flex) พร้อมปุ่มยกเลิก หรือข้อความถ้ายังไม่มี"""
     if not user_id:
         return TextMessage(text="ดูประวัติการจองได้เฉพาะในแชตส่วนตัวกับบอทครับ")
-    bookings = get_user_bookings(user_id)
-    if not bookings:
+    history = get_user_history(user_id)
+    if not history:
         return TextMessage(text="📭 ยังไม่มีประวัติการจองครับ พิมพ์ \"จองคอร์ด\" เพื่อเริ่มจองได้เลย")
 
     today = today_str()
+    used_today = sum(1 for d, _c, _h, cancelled in history if d == today and not cancelled)
     rows = []
-    for date, court, hour in bookings[:HISTORY_LIMIT]:
+    for date, court, hour, cancelled in history[:HISTORY_LIMIT]:
         is_today = date == today
+        if cancelled:
+            bg, date_color = "#F2F2F2", "#9E9E9E"
+        else:
+            bg, date_color = ("#E8F5E9", "#2E7D32") if is_today else ("#F6F6F6", "#444444")
+        date_text = f"วันนี้ {_thai_date(date)}" if is_today else _thai_date(date)
+        strike = {"decoration": "line-through"} if cancelled else {}
+        info = {
+            "type": "box",
+            "layout": "horizontal",
+            "spacing": "sm",
+            "contents": [
+                {"type": "text", "text": date_text, "flex": 4, "size": "sm", "gravity": "center", "color": date_color, **strike},
+                {"type": "text", "text": f"คอร์ด {court}", "flex": 3, "size": "sm", "weight": "bold", "gravity": "center", "color": "#9E9E9E" if cancelled else "#222222", **strike},
+                {"type": "text", "text": slot_label(hour), "flex": 5, "size": "xs", "align": "end", "gravity": "center", "color": "#9E9E9E" if cancelled else "#444444", **strike},
+            ],
+        }
+        contents = [info]
+        if cancelled:
+            contents.append({"type": "text", "text": "ยกเลิกแล้ว", "size": "xs", "color": "#9E9E9E", "margin": "xs"})
+        elif _can_cancel(date, hour):
+            contents.append(
+                {
+                    "type": "button",
+                    "style": "secondary",
+                    "height": "sm",
+                    "margin": "sm",
+                    "action": {
+                        "type": "postback",
+                        "label": "ยกเลิกการจองนี้",
+                        "data": f"a=cancel_ask&d={date}&c={court}&h={hour}",
+                    },
+                }
+            )
         rows.append(
             {
                 "type": "box",
-                "layout": "horizontal",
-                "spacing": "sm",
+                "layout": "vertical",
                 "paddingAll": "sm",
                 "margin": "xs",
                 "cornerRadius": "md",
-                "backgroundColor": "#E8F5E9" if is_today else "#F6F6F6",
-                "contents": [
-                    {"type": "text", "text": _thai_date(date), "flex": 4, "size": "sm", "gravity": "center"},
-                    {"type": "text", "text": f"คอร์ด {court}", "flex": 3, "size": "sm", "weight": "bold", "gravity": "center"},
-                    {"type": "text", "text": slot_label(hour), "flex": 5, "size": "xs", "align": "end", "gravity": "center"},
-                ],
+                "backgroundColor": bg,
+                "contents": contents,
             }
         )
-        if is_today:
-            rows[-1]["contents"][0]["text"] = f"วันนี้ {_thai_date(date)}"
-            rows[-1]["contents"][0]["color"] = "#2E7D32"
 
-    sub = f"แสดง {min(len(bookings), HISTORY_LIMIT)} รายการล่าสุด จากทั้งหมด {len(bookings)}"
+    sub = (
+        f"วันนี้จองแล้ว {used_today}/{MAX_PER_USER} ชม. · "
+        f"แสดง {min(len(history), HISTORY_LIMIT)} จาก {len(history)} รายการ"
+    )
     bubble = {
         "type": "bubble",
         "header": _title("🗓 ประวัติการจองของคุณ", sub),
         "body": {"type": "box", "layout": "vertical", "contents": rows},
     }
     return _flex("ประวัติการจองของคุณ", bubble)
+
+
+def cancel_confirm_flex(date: str, court: int, hour: int) -> FlexMessage:
+    """ถามยืนยันก่อนยกเลิก กันกดพลาด"""
+    bubble = {
+        "type": "bubble",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {"type": "text", "text": "ยกเลิกการจองนี้ใช่ไหม?", "weight": "bold", "size": "md"},
+                {"type": "text", "text": f"คอร์ด {court}", "size": "sm"},
+                {"type": "text", "text": f"วันที่ {_thai_date(date)}", "size": "sm"},
+                {"type": "text", "text": f"เวลา {slot_label(hour)}", "size": "sm"},
+            ],
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#C62828",
+                    "height": "sm",
+                    "action": {
+                        "type": "postback",
+                        "label": "✅ ยืนยันยกเลิก",
+                        "data": f"a=cancel_do&d={date}&c={court}&h={hour}",
+                    },
+                },
+                {
+                    "type": "button",
+                    "style": "secondary",
+                    "height": "sm",
+                    "action": {"type": "postback", "label": "ไม่ยกเลิก", "data": "a=mybookings"},
+                },
+            ],
+        },
+    }
+    return _flex("ยืนยันการยกเลิกการจอง", bubble)
 
 
 def result_text(result: str, court: int, hour: int) -> str:
@@ -189,7 +336,20 @@ def result_text(result: str, court: int, hour: int) -> str:
         return "❌ ขออภัย ช่วงเวลานี้มีคนจองไปแล้ว เลือกช่วงอื่นได้เลยครับ"
     if result == "past":
         return "⏰ ช่วงเวลานี้ผ่านไปแล้วครับ"
+    if result == "limit":
+        return (
+            f"⚠️ จองได้สูงสุด {MAX_PER_USER} ชั่วโมงต่อวันต่อคนครับ\n"
+            "ถ้าอยากเปลี่ยนช่วงเวลา ให้ยกเลิกการจองเดิมก่อน (พิมพ์ \"ยกเลิกจอง\")"
+        )
     return "ข้อมูลไม่ถูกต้อง ลองเลือกใหม่อีกครั้งนะครับ"
+
+
+def cancel_result_text(result: str, date: str, court: int, hour: int) -> str:
+    if result == "ok":
+        return f"✅ ยกเลิกแล้ว\nคอร์ด {court} วันที่ {_thai_date(date)}\nเวลา {slot_label(hour)}"
+    if result == "past":
+        return "⏰ ช่วงเวลานี้ผ่านไปแล้ว ยกเลิกไม่ได้ครับ"
+    return "ไม่พบการจองนี้ (อาจยกเลิกไปแล้ว) ครับ"
 
 
 # ------------------------------------------------------------------ Flex builders
@@ -252,7 +412,7 @@ def court_picker_flex() -> FlexMessage:
 
     bubble = {
         "type": "bubble",
-        "header": _title("🏸 เลือกคอร์ด", f"วันที่ {today_thai()} · เปิด 10:00 – 20:00"),
+        "header": _title("🏸 เลือกคอร์ด", f"วันที่ {today_thai()} · เปิด 10:00-20:00"),
         "body": {"type": "box", "layout": "vertical", "contents": rows},
         "footer": {
             "type": "box",
@@ -338,7 +498,7 @@ def status_flex() -> FlexMessage:
     header_row = {
         "type": "box",
         "layout": "horizontal",
-        "contents": [cell("เวลา", 3, weight="bold", color="#555555", align="start")]
+        "contents": [cell("เวลา", 4, weight="bold", color="#555555", align="start")]
         + [cell(str(c), 2, weight="bold", color="#555555") for c in COURTS],
     }
     rows = [header_row, {"type": "separator", "margin": "sm"}]
@@ -356,7 +516,7 @@ def status_flex() -> FlexMessage:
                 "type": "box",
                 "layout": "horizontal",
                 "margin": "md",
-                "contents": [cell(f"{h:02d}-{h + 1:02d}", 3, align="start", color="#444444")]
+                "contents": [cell(slot_label(h), 4, align="start", color="#444444", size="xs")]
                 + [cell(i, 2) for i in icons],
             }
         )

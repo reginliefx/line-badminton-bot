@@ -83,7 +83,7 @@ def build_messages(rule: dict, user_id: str | None = None):
     # ระบบจองคอร์ด
     action = rule.get("action")
     if action == "book_menu":
-        messages.append(booking.court_picker_flex())
+        messages.append(booking.date_picker_flex())
     elif action == "status":
         messages.append(booking.status_flex())
     elif action == "my_bookings":
@@ -242,8 +242,12 @@ def on_postback(event: PostbackEvent):
     data = dict(parse_qsl(event.postback.data))
     action = data.get("a")
     try:
-        if action == "menu":
-            messages = [booking.court_picker_flex()]
+        if action == "dates":
+            messages = [booking.date_picker_flex()]
+        elif action == "menu":
+            messages = [booking.court_picker_flex(data.get("d"))]
+        elif action == "status":
+            messages = [booking.status_flex(data.get("d"))]
         elif action == "resume":
             # ปุ่ม "คืนให้บอท" จากแจ้งเตือน — เฉพาะแอดมินเท่านั้น
             if event.source.user_id not in ADMIN_USER_IDS:
@@ -278,14 +282,15 @@ def on_postback(event: PostbackEvent):
                 booking.my_bookings_message(user_id),
             ]
         elif action == "court":
-            messages = [booking.slot_picker_flex(int(data["c"]))]
+            messages = [booking.slot_picker_flex(int(data["c"]), data.get("d"))]
         elif action == "book":
             court, hour = int(data["c"]), int(data["h"])
+            date = data.get("d") or booking.today_str()
             user_id = event.source.user_id
-            result = booking.book_slot(court, hour, user_id, get_display_name(user_id))
+            result = booking.book_slot(court, hour, user_id, get_display_name(user_id), date)
             messages = [
-                TextMessage(text=booking.result_text(result, court, hour)),
-                booking.slot_picker_flex(court),
+                TextMessage(text=booking.result_text(result, court, hour, date)),
+                booking.slot_picker_flex(court, date),
             ]
         else:
             return
